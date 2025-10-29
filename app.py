@@ -2,31 +2,122 @@ from flask import Flask, jsonify, request, send_file, send_from_directory
 import pandas as pd
 import numpy as np
 import datetime
+from datetime import timedelta
 import random
 import os
+import secrets
+import string
+from sqlalchemy.exc import IntegrityError
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from pytrends.request import TrendReq
 from flask_cors import CORS
+from flask_bcrypt import Bcrypt
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    get_jwt_identity,
+    jwt_required,
+)
 import sys
 from pathlib import Path
 
+from models import db, User, Client
+
 BASE_DIR = Path(__file__).resolve().parent
 
+bcrypt = Bcrypt()
+jwt = JWTManager()
+
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
 
-# Mocked users for onboarding + referral + admin control
-USERS_DB = [
-    {"email": "admin@therankflow.com", "password": "admin123", "tier": "admin", "referral_code": "ADMIN123", "referrals": 12, "revenue": 4200},
-    {"email": "therapist1@email.com", "password": "abc123", "tier": "pro", "referral_code": "THERA1", "referrals": 2, "revenue": 650},
-    {"email": "newuser@email.com", "password": "testpass", "tier": "free", "referral_code": "FREENEW", "referrals": 0, "revenue": 0},
+default_db_path = BASE_DIR / "forecastcity.db"
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", f"sqlite:///{default_db_path}")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "change-me")
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=12)
+
+db.init_app(app)
+bcrypt.init_app(app)
+jwt.init_app(app)
+
+INITIAL_USERS = [
+    {
+        "email": "admin@therankflow.com",
+        "password": "admin123",
+        "tier": "admin",
+        "referral_code": "ADMIN123",
+        "referrals": 12,
+        "revenue": 4200,
+    },
+    {
+        "email": "therapist1@email.com",
+        "password": "abc123",
+        "tier": "pro",
+        "referral_code": "THERA1",
+        "referrals": 2,
+        "revenue": 650,
+    },
+    {
+        "email": "newuser@email.com",
+        "password": "testpass",
+        "tier": "free",
+        "referral_code": "FREENEW",
+        "referrals": 0,
+        "revenue": 0,
+    },
 ]
 
-CLIENTS_DB = [
-    {"client_id": 1, "name": "James", "city": "Atlanta", "last_seen": "2023-10-21", "repeat": True},
-    {"client_id": 2, "name": "Liam", "city": "Boston", "last_seen": "2023-09-18", "repeat": False},
-    {"client_id": 3, "name": "Mason", "city": "Dallas", "last_seen": "2023-10-01", "repeat": True}
+INITIAL_CLIENTS = [
+    {"name": "James", "city": "Atlanta", "last_seen": "2023-10-21", "repeat": True, "owner_email": "admin@therankflow.com"},
+    {"name": "Liam", "city": "Boston", "last_seen": "2023-09-18", "repeat": False, "owner_email": "admin@therankflow.com"},
+    {"name": "Mason", "city": "Dallas", "last_seen": "2023-10-01", "repeat": True, "owner_email": "admin@therankflow.com"},
 ]
+
+
+def generate_referral_code(length: int = 8) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    while True:
+        code = "".join(secrets.choice(alphabet) for _ in range(length))
+        if not User.query.filter_by(referral_code=code).first():
+            return code
+
+
+def seed_initial_data() -> None:
+    for user_data in INITIAL_USERS:
+        if User.query.filter_by(email=user_data["email"]).first():
+            continue
+        password_hash = bcrypt.generate_password_hash(user_data["password"]).decode("utf-8")
+        user = User(
+            email=user_data["email"],
+            password_hash=password_hash,
+            tier=user_data["tier"],
+            referral_code=user_data["referral_code"],
+            referrals=user_data["referrals"],
+            revenue=user_data["revenue"],
+        )
+        db.session.add(user)
+
+    db.session.commit()
+
+    for client_data in INITIAL_CLIENTS:
+        owner = User.query.filter_by(email=client_data["owner_email"]).first()
+        if not owner:
+            continue
+        exists = Client.query.filter_by(name=client_data["name"], user_id=owner.id).first()
+        if exists:
+            continue
+        last_seen = datetime.datetime.strptime(client_data["last_seen"], "%Y-%m-%d").date()
+        client = Client(
+            name=client_data["name"],
+            city=client_data["city"],
+            last_seen=last_seen,
+            repeat=client_data["repeat"],
+            user_id=owner.id,
+        )
+        db.session.add(client)
+
+    db.session.commit()
 
 KEYWORDS = ["gay massage", "male massage therapist near me", "rentmasseur", "deep tissue gay massage"]
 CIDADES_INFO = [
@@ -41,6 +132,11 @@ START_DATE = "2022-01-01"
 END_DATE = datetime.date.today().isoformat()
 df_previsoes = None
 ranking = None
+
+# Ensure database schema and demo records exist when the app boots
+with app.app_context():
+    db.create_all()
+    seed_initial_data()
 
 # -----------------------------------------
 # COLETA + PREVISÃO
@@ -108,11 +204,19 @@ def run_model():
 
 @app.route("/api/login", methods=["POST"])
 def login():
-    data = request.json
-    user = next((u for u in USERS_DB if u["email"] == data.get("email") and u["password"] == data.get("password")), None)
-    if user:
-        return jsonify({"status": "ok", "user": user})
-    return jsonify({"status": "error", "message": "Credenciais inválidas."}), 401
+    data = request.json or {}
+    email = data.get("email")
+    password = data.get("password")
+
+    if not email or not password:
+        return jsonify({"status": "error", "message": "Credenciais inválidas."}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user or not bcrypt.check_password_hash(user.password_hash, password):
+        return jsonify({"status": "error", "message": "Credenciais inválidas."}), 401
+
+    token = create_access_token(identity=user.email)
+    return jsonify({"status": "ok", "token": token, "user": user.to_dict()})
 
 
 @app.route("/api/data/summary")
@@ -131,19 +235,24 @@ def get_predictions():
 
 @app.route("/api/users")
 def get_users():
-    return jsonify(USERS_DB)
+    users = User.query.all()
+    return jsonify([user.to_dict() for user in users])
 
 
 @app.route("/api/user/<email>")
 def get_user_by_email(email):
-    user = next((u for u in USERS_DB if u["email"] == email), None)
-    return jsonify(user or {"error": "Usuário não encontrado."})
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": "Usuário não encontrado."}), 404
+    return jsonify(user.to_dict())
 
 
 @app.route("/api/referral/<code>")
 def referral_lookup(code):
-    user = next((u for u in USERS_DB if u["referral_code"] == code), None)
-    return jsonify(user or {"error": "Código inválido."})
+    user = User.query.filter_by(referral_code=code).first()
+    if not user:
+        return jsonify({"error": "Código inválido."}), 404
+    return jsonify(user.to_dict())
 
 
 @app.route("/api/onboarding")
@@ -157,8 +266,59 @@ def onboarding_steps():
 
 
 @app.route("/api/clients")
+@jwt_required()
 def get_clients():
-    return jsonify(CLIENTS_DB)
+    current_email = get_jwt_identity()
+    user = User.query.filter_by(email=current_email).first()
+    if not user:
+        return jsonify({"error": "Usuário não encontrado."}), 404
+
+    clients = Client.query.filter_by(user_id=user.id).all()
+    return jsonify([client.to_dict() for client in clients])
+
+
+@app.route("/api/register", methods=["POST"])
+def register_user():
+    data = request.json or {}
+    email = data.get("email")
+    password = data.get("password")
+    tier = data.get("tier", "free")
+    referral_code = data.get("referral_code")
+
+    if not email or not password:
+        return jsonify({"error": "Email e senha são obrigatórios"}), 400
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "Email já registrado"}), 409
+
+    if referral_code:
+        if User.query.filter_by(referral_code=referral_code).first():
+            return jsonify({"error": "Código de indicação já em uso"}), 409
+    else:
+        referral_code = generate_referral_code()
+
+    password_hash = bcrypt.generate_password_hash(password).decode("utf-8")
+
+    new_user = User(
+        email=email,
+        password_hash=password_hash,
+        tier=tier,
+        referral_code=referral_code,
+        referrals=0,
+        revenue=0,
+    )
+
+    db.session.add(new_user)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        referral_code = generate_referral_code()
+        new_user.referral_code = referral_code
+        db.session.add(new_user)
+        db.session.commit()
+
+    return jsonify({"message": "Usuário registrado com sucesso", "user": new_user.to_dict()}), 201
 
 
 @app.route("/api/chat", methods=["POST"])

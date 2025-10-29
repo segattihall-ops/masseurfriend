@@ -1,0 +1,14 @@
+Flask
+flask-cors
+flask-bcrypt
+flask-jwt-extended
+flask-sqlalchemy
+pandas
+numpy
+statsmodels
+pytrends
+gunicorn
+celery
+redis
+psycopg2-binary
+python-dotenv
