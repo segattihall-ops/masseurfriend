@@ -1,1 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ForecastCity Keywords Dashboard</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" integrity="sha256-y0DFhS+sLjUlWMZTLyhKw3R4fAZvmNR13yjAOz0A2qo=" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --surface: rgba(15, 23, 42, 0.85);
+      --card: rgba(15, 23, 42, 0.65);
+      --text: #e2e8f0;
+      --accent: #38bdf8;
+      --accent-strong: #0ea5e9;
+      --muted: #94a3b8;
+    }
 
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #1e293b, #020617 45%);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    header {
+      padding: 2.5rem 1.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      position: sticky;
+      top: 0;
+      background: linear-gradient(180deg, rgba(2, 6, 23, 0.95), rgba(2, 6, 23, 0.35));
+      backdrop-filter: blur(14px);
+      z-index: 10;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: clamp(1.5rem, 2vw + 1rem, 2.4rem);
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      letter-spacing: -0.01em;
+    }
+
+    header h1 span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 0.9rem;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(14, 165, 233, 0.55));
+      color: var(--accent);
+      font-size: 1.4rem;
+    }
+
+    main {
+      flex: 1;
+      padding: 0 1.75rem 2.5rem;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+
+    .controls-card, .card, .table-card {
+      background: var(--surface);
+      border-radius: 1.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      box-shadow: 0 25px 80px rgba(2, 6, 23, 0.55);
+      padding: 1.75rem;
+    }
+
+    .controls-card {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    .controls-card h2 {
+      margin: 0;
+      font-size: 1.35rem;
+    }
+
+    .controls-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    button#run-btn {
+      align-self: flex-start;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      color: #0f172a;
+      border: none;
+      border-radius: 999px;
+      padding: 0.85rem 1.6rem;
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: transform 0.18s ease, filter 0.18s ease, box-shadow 0.18s ease;
+      box-shadow: 0 15px 35px rgba(14, 165, 233, 0.45);
+    }
+
+    button#run-btn:disabled {
+      opacity: 0.6;
+      cursor: wait;
+      box-shadow: none;
+    }
+
+    button#run-btn:not(:disabled):hover {
+      transform: translateY(-1px);
+      filter: brightness(1.05);
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.14);
+      color: var(--accent);
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .status-chip[data-state="error"] {
+      background: rgba(248, 113, 113, 0.18);
+      color: #fca5a5;
+    }
+
+    .status-chip[data-state="idle"] {
+      background: rgba(148, 163, 184, 0.16);
+      color: var(--muted);
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.1rem;
+    }
+
+    .metric-card {
+      background: var(--card);
+      border-radius: 1.1rem;
+      border: 1px solid rgba(148, 163, 184, 0.08);
+      padding: 1.4rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .metric-card span:first-child {
+      font-size: 0.85rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .metric-card span:last-child {
+      font-size: 1.75rem;
+      font-weight: 600;
+    }
+
+    .chart-card {
+      padding: 0;
+    }
+
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.4rem 1.75rem 0.5rem;
+    }
+
+    .chart-header h2 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+
+    .chart-container {
+      position: relative;
+      padding: 0 1.25rem 1.75rem;
+      height: 320px;
+    }
+
+    .table-card h2 {
+      margin: 0 0 1rem;
+      font-size: 1.2rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    th, td {
+      padding: 0.75rem 0.9rem;
+      text-align: left;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    th {
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      background: rgba(148, 163, 184, 0.08);
+    }
+
+    tbody tr:hover {
+      background: rgba(56, 189, 248, 0.08);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .empty-state {
+      padding: 1.2rem;
+      background: rgba(148, 163, 184, 0.09);
+      border-radius: 0.85rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    footer {
+      text-align: center;
+      padding: 1.25rem;
+      color: rgba(148, 163, 184, 0.65);
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 640px) {
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .controls-card {
+        padding: 1.35rem;
+      }
+
+      .controls-card p {
+        font-size: 0.95rem;
+      }
+
+      .chart-container {
+        padding: 0 1rem 1.4rem;
+        height: 260px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>📈</span> ForecastCity Pulse</h1>
+    <div class="status-chip" id="run-status" data-state="idle">Awaiting forecast run</div>
+  </header>
+  <main>
+    <section class="controls-card">
+      <div>
+        <h2>Forecast Pipeline</h2>
+        <p>Trigger the Google Trends forecast engine to refresh spike probabilities, revenue projections, and CRM insights for your referral network.</p>
+      </div>
+      <div style="display:flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+        <button id="run-btn" type="button">⚡ Run Forecast</button>
+        <small id="last-run" style="color: var(--muted);"></small>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="metrics-grid" id="metrics-grid">
+        <div class="metric-card">
+          <span>Top City</span>
+          <span id="metric-top-city">—</span>
+        </div>
+        <div class="metric-card">
+          <span>Active Markets</span>
+          <span id="metric-city-count">—</span>
+        </div>
+        <div class="metric-card">
+          <span>Keywords Tracked</span>
+          <span id="metric-keyword-count">—</span>
+        </div>
+        <div class="metric-card">
+          <span>Projected Demand</span>
+          <span id="metric-demand">—</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="chart-header">
+        <h2>14-day Opportunity Outlook</h2>
+        <span style="color: var(--muted); font-size: 0.9rem;">Aggregate predicted demand across all markets</span>
+      </div>
+      <div class="chart-container">
+        <canvas id="forecast-chart" aria-label="Demand forecast line chart" role="img"></canvas>
+      </div>
+    </section>
+
+    <section class="table-card">
+      <h2>City Opportunity Ranking</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>City</th>
+              <th>Region</th>
+              <th>Avg Score</th>
+              <th>Latitude</th>
+              <th>Longitude</th>
+            </tr>
+          </thead>
+          <tbody id="ranking-body">
+            <tr><td colspan="5" class="empty-state">Run the forecast to populate the ranking.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="table-card">
+      <h2>Upcoming Keyword Spikes</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>City</th>
+              <th>Keyword</th>
+              <th>Forecast</th>
+              <th>Spike Probability</th>
+              <th>Competition</th>
+              <th>Demand Stars</th>
+            </tr>
+          </thead>
+          <tbody id="predictions-body">
+            <tr><td colspan="7" class="empty-state">No predictions yet — kick off the pipeline above.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <footer>
+    Built for the MasseurFriend growth team • Auto-refreshes when new forecasts are available
+  </footer>
+
+  <script>
+    const runBtn = document.getElementById('run-btn');
+    const runStatus = document.getElementById('run-status');
+    const lastRunEl = document.getElementById('last-run');
+    const rankingBody = document.getElementById('ranking-body');
+    const predictionsBody = document.getElementById('predictions-body');
+    const topCityEl = document.getElementById('metric-top-city');
+    const cityCountEl = document.getElementById('metric-city-count');
+    const keywordCountEl = document.getElementById('metric-keyword-count');
+    const demandEl = document.getElementById('metric-demand');
+    let chartInstance = null;
+
+    function setStatus(message, state = 'idle') {
+      runStatus.textContent = message;
+      runStatus.dataset.state = state;
+    }
+
+    async function runForecast() {
+      runBtn.disabled = true;
+      setStatus('Running forecast…', 'idle');
+      try {
+        const response = await fetch('/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.status !== 'ok') {
+          throw new Error(payload.message || 'Unable to run forecast');
+        }
+        const now = new Date();
+        lastRunEl.textContent = `Last executed ${now.toLocaleString()}`;
+        setStatus(`Forecast ready • Top city ${payload.top_city}`, 'success');
+        await loadData();
+      } catch (error) {
+        console.error(error);
+        setStatus(`Error: ${error.message}`, 'error');
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    function formatNumber(value) {
+      return Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+
+    function formatFloat(value, digits = 1) {
+      return Number(value).toLocaleString(undefined, { maximumFractionDigits: digits });
+    }
+
+    function renderRanking(data) {
+      if (!Array.isArray(data) || data.length === 0) {
+        rankingBody.innerHTML = '<tr><td colspan="5" class="empty-state">No ranking data. Run the forecast above.</td></tr>';
+        return;
+      }
+      const rows = data.map((row) => `
+        <tr>
+          <td>${row.cidade}</td>
+          <td>${row.regiao}</td>
+          <td>${formatFloat(row.score, 2)}</td>
+          <td>${formatFloat(row.lat, 4)}</td>
+          <td>${formatFloat(row.lon, 4)}</td>
+        </tr>
+      `).join('');
+      rankingBody.innerHTML = rows;
+    }
+
+    function renderPredictions(data) {
+      if (!Array.isArray(data) || data.length === 0) {
+        predictionsBody.innerHTML = '<tr><td colspan="7" class="empty-state">No predictions available.</td></tr>';
+        return;
+      }
+      const sorted = [...data].sort((a, b) => new Date(a.ds) - new Date(b.ds));
+      const rows = sorted.slice(0, 150).map((row) => `
+        <tr>
+          <td>${row.ds}</td>
+          <td>${row.cidade}</td>
+          <td>${row.keyword}</td>
+          <td>${formatFloat(row.yhat, 1)}</td>
+          <td>${formatFloat(row.spike_prob, 1)}%</td>
+          <td>${formatFloat(row.concorrencia, 1)}</td>
+          <td>${'★'.repeat(Number(row.demand_stars))}</td>
+        </tr>
+      `).join('');
+      predictionsBody.innerHTML = rows;
+    }
+
+    function renderMetrics(predictions, ranking) {
+      if (!Array.isArray(predictions) || predictions.length === 0) {
+        topCityEl.textContent = '—';
+        cityCountEl.textContent = '—';
+        keywordCountEl.textContent = '—';
+        demandEl.textContent = '—';
+        return;
+      }
+      const cities = new Set(predictions.map((row) => row.cidade));
+      const keywords = new Set(predictions.map((row) => row.keyword));
+      const demandTotal = predictions.reduce((acc, row) => acc + Number(row.yhat || 0), 0);
+      cityCountEl.textContent = cities.size;
+      keywordCountEl.textContent = keywords.size;
+      demandEl.textContent = formatNumber(demandTotal.toFixed(0));
+      if (Array.isArray(ranking) && ranking.length) {
+        topCityEl.textContent = ranking[0].cidade;
+      } else {
+        const [firstCity] = Array.from(cities);
+        topCityEl.textContent = firstCity || '—';
+      }
+    }
+
+    function renderChart(predictions) {
+      const ctx = document.getElementById('forecast-chart');
+      if (chartInstance) {
+        chartInstance.destroy();
+      }
+      if (!Array.isArray(predictions) || predictions.length === 0) {
+        chartInstance = null;
+        return;
+      }
+      const upcoming = predictions.filter((row) => {
+        const date = new Date(row.ds);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return date >= today;
+      });
+      const totals = new Map();
+      upcoming.forEach((row) => {
+        const key = row.ds;
+        const current = totals.get(key) || 0;
+        totals.set(key, current + Number(row.yhat || 0));
+      });
+      const labels = Array.from(totals.keys()).sort((a, b) => new Date(a) - new Date(b));
+      const data = labels.map((label) => totals.get(label));
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Aggregate search interest',
+            data,
+            fill: true,
+            tension: 0.32,
+            borderColor: 'rgba(56, 189, 248, 0.85)',
+            backgroundColor: ctx => {
+              const {ctx: canvasCtx, chartArea} = ctx.chart;
+              if (!chartArea) return 'rgba(56, 189, 248, 0.15)';
+              const gradient = canvasCtx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+              gradient.addColorStop(0, 'rgba(56, 189, 248, 0.45)');
+              gradient.addColorStop(1, 'rgba(14, 165, 233, 0.02)');
+              return gradient;
+            },
+            pointRadius: 3,
+            pointBackgroundColor: '#38bdf8',
+            pointHoverRadius: 6,
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              grid: { color: 'rgba(148, 163, 184, 0.1)' },
+              ticks: { color: 'rgba(148, 163, 184, 0.8)' }
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: 'rgba(148, 163, 184, 0.12)' },
+              ticks: {
+                color: 'rgba(148, 163, 184, 0.85)',
+                callback: (value) => formatNumber(value)
+              }
+            }
+          },
+          plugins: {
+            legend: { labels: { color: 'rgba(148, 163, 184, 0.8)' } },
+            tooltip: {
+              callbacks: {
+                label: (context) => ` ${formatNumber(context.parsed.y)} projected searches`
+              }
+            }
+          }
+        }
+      });
+    }
+
+    async function fetchJson(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || response.statusText);
+      }
+      return response.json();
+    }
+
+    async function loadData() {
+      try {
+        const [summary, predictions] = await Promise.all([
+          fetchJson('/api/data/summary').catch(() => []),
+          fetchJson('/api/data/predictions').catch(() => [])
+        ]);
+        renderRanking(summary);
+        renderPredictions(predictions);
+        renderMetrics(predictions, summary);
+        renderChart(predictions);
+        if (Array.isArray(predictions) && predictions.length) {
+          setStatus('Forecast ready', 'success');
+        }
+      } catch (error) {
+        console.error('Failed to load dashboard data', error);
+        setStatus(`Unable to load data: ${error.message}`, 'error');
+      }
+    }
+
+    runBtn.addEventListener('click', runForecast);
+
+    loadData();
+  </script>
+</body>
+</html>
